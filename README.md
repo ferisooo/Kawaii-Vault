@@ -36,8 +36,8 @@ These are the "okay, I *need* this" features — and every one of them is **free
   (So write your password down somewhere safe — there is genuinely no recovery.)
 - **Optional key file** — require a specific file (like a USB stick) *in
   addition* to your password, for two-factor-style unlocking.
-- **Memory hardening** — keys are kept XOR-masked, wiped from RAM when no longer
-  needed, and (on Mac/Linux) locked out of the swap file.
+- **Memory hardening** — keys are kept XOR-masked in memory and wiped from RAM
+  when they're no longer needed.
 
 ### 🕵️ Panic & stealth features you won't find in a normal "photo vault"
 - **🐍 Decoy Snake Game** — turn on stealth login and CyberVault disguises
@@ -55,9 +55,11 @@ These are the "okay, I *need* this" features — and every one of them is **free
   vault from anywhere.
 
 ### 🗂️ Actually pleasant to use
-- **Built-in private browser** — browse and save media straight into the vault;
-  downloads are **auto-encrypted and imported**, and the plaintext copy is
-  deleted. It even filters ads/trackers.
+- **Built-in private browser** — a separate incognito window (no history or
+  cookies kept) for browsing and saving media straight into the vault. Downloads
+  are **redirected into the vault, encrypted, and imported automatically**, then
+  the plaintext copy is deleted. Its media scanner even filters out ad/tracker
+  links using a host blocklist.
 - **Watch-folder auto-import** — point it at a folder and new files get pulled
   into the vault automatically.
 - **Built-in viewer & slideshow** — preview images/video *inside* the vault so
@@ -87,7 +89,7 @@ is built so you don't have to:
 | Other apps often... | CyberVault... |
 |---------------------|---------------|
 | Upload your files to "the cloud" | Keeps **everything on your device** |
-| Make you create an account | **No account, no email, no login to us** |
+| Make you create an account | **No account, no email, no login at all** |
 | Track you with analytics/ads | **Collects nothing** — zero tracking, no telemetry |
 | Lock features behind a subscription | Is **100% free** — every feature unlocked |
 | Hide their code | Is **fully open-source** — read every line |
@@ -95,13 +97,16 @@ is built so you don't have to:
 | Just hide a folder | Has **duress wipe, self-destruct, and a decoy game** |
 | Look like boring office software | Looks like it belongs in a cyberpunk movie 😎 |
 
-In short: **it's private because of how it's built, not because we promise to be
-nice.** See the [Privacy Policy](./PRIVACY_POLICY.md) and
+In short: **it's private because of how it's built — not because anyone is
+asking you to take their word for it.** See the [Privacy Policy](./PRIVACY_POLICY.md) and
 [Terms of Service](./TERMS_OF_SERVICE.md) for the full story.
 
 ---
 
 ## 🚀 Setup guide (for people who have *never* touched code)
+
+> 🪟 **CyberVault is built for Windows.** These steps (and the helper scripts)
+> assume Windows 10 or 11.
 
 Don't worry — you don't need to "know how to program." Just follow the steps in
 order. ☕ Grab a drink; the very first launch takes a little while.
@@ -114,21 +119,16 @@ Click each link, download, and run the installer with the **default options**:
 1. **Node.js** → <https://nodejs.org> — pick the button that says **"LTS"**.
 2. **Rust** → <https://rustup.rs> — run the installer and accept the defaults.
 3. **Git** → <https://git-scm.com/downloads> — accept the defaults.
-
-> 💡 **Windows users:** you may also need the free
-> [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
-> **Mac users:** open the "Terminal" app and run `xcode-select --install`.
-> **Linux users:** see the official list of system packages here →
-> <https://tauri.app/start/prerequisites/>.
+4. **Microsoft C++ Build Tools** → free from
+   [here](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (needed to
+   build the app on Windows).
 
 After installing, **restart your computer once** so everything is recognized.
 
 ### Step 2 — Download CyberVault
 
-1. Open a terminal:
-   - **Windows:** press the Start key, type **PowerShell**, press Enter.
-   - **Mac:** open the **Terminal** app.
-   - **Linux:** open your **Terminal**.
+1. Press the **Start** key, type **PowerShell**, and press Enter to open a
+   terminal.
 2. Copy and paste these lines **one at a time**, pressing Enter after each:
 
 ```bash
@@ -244,7 +244,7 @@ never performed; you can confirm `isPro` is hard-set to `true` in
 ## 📚 More reading
 
 - [`ABOUT.md`](./ABOUT.md) — the story behind CyberVault.
-- [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md) — what we collect (spoiler: nothing).
+- [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md) — what gets collected (spoiler: nothing).
 - [`TERMS_OF_SERVICE.md`](./TERMS_OF_SERVICE.md) — terms, and how to fork it.
 - [`LICENSE`](./LICENSE) — the open-source license.
 
