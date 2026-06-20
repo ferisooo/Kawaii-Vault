@@ -85,8 +85,18 @@ impl Resp {
 
 const SESSION_TTL: Duration = Duration::from_secs(20 * 60);
 const CHALLENGE_TTL: Duration = Duration::from_secs(120);
-const MIN_PASSWORD_LEN: usize = 8;
+const MIN_PASSWORD_LEN: usize = 12;
 const MAX_LOGIN_FAILS: u32 = 5;
+/// Upper bound on outstanding (unconsumed, unexpired) login nonces. Without a
+/// cap, an unauthenticated client on the LAN could spam GET /challenge and grow
+/// the map without bound. 4096 is far more than any legitimate login flow needs.
+const MAX_CHALLENGES: usize = 4096;
+/// Iteration count for stretching the login proof. The phone hashes
+/// SHA-256(nonce ":" password) once, then re-hashes the resulting hex string
+/// this many times; the server mirrors it. Cost is trivial for one interactive
+/// login but multiplies the work of an offline brute-force against a proof
+/// captured via a MITM'd self-signed TLS session.
+const PROOF_ITERATIONS: u32 = 100_000;
 
 struct Sessions {
     tokens: HashMap<String, Instant>, // token -> expiry
@@ -424,6 +434,12 @@ fn route(req: &Req, shared: &Shared) -> Resp {
         if let Ok(mut c) = shared.challenges.lock() {
             let now = Instant::now();
             c.retain(|_, exp| *exp > now);
+            // Bounded so an unauthenticated flood of /challenge can't grow the
+            // map without limit. Once full, refuse new nonces until live ones
+            // expire or are consumed by a login.
+            if c.len() >= MAX_CHALLENGES {
+                return Resp::json(503, "{\"error\":\"too many pending challenges\"}".into());
+            }
             c.insert(nonce.clone(), now + CHALLENGE_TTL);
         }
         return Resp::json(200, format!("{{\"nonce\":\"{}\"}}", nonce));
@@ -482,13 +498,20 @@ fn handle_login(req: &Req, shared: &Shared) -> Resp {
         Err(_) => false,
     };
 
-    // Expected proof = hex(SHA-256(nonce ":" password)).
+    // Expected proof: hex(SHA-256(nonce ":" password)), then re-hash the
+    // resulting lowercase-hex string PROOF_ITERATIONS times. The phone computes
+    // the identical chain in JS, so the access password is never transmitted
+    // and a captured proof is far more expensive to brute-force offline.
     let expected = {
         let mut h = Sha256::new();
         h.update(nonce.as_bytes());
         h.update(b":");
         h.update(&shared.password);
-        hex::encode(h.finalize())
+        let mut proof = hex::encode(h.finalize());
+        for _ in 0..PROOF_ITERATIONS {
+            proof = hex::encode(Sha256::digest(proof.as_bytes()));
+        }
+        proof
     };
 
     if nonce_ok && ct_eq(proof.as_bytes(), expected.as_bytes()) {
@@ -603,7 +626,7 @@ fn handle_file(req: &Req, shared: &Shared, id: &str) -> Resp {
             crate::read_decrypted_range(
                 &mut file, info.offset_in_bundle,
                 info.encryption_key.as_ref().unwrap(), info.encryption_salt.as_ref().unwrap(),
-                &info.file_id, total, start, len,
+                &info.file_id, total, start, len, info.aead_bound,
             )
         } else {
             let mut buf = vec![0u8; len as usize];
@@ -626,7 +649,7 @@ fn handle_file(req: &Req, shared: &Shared, id: &str) -> Resp {
                 || std::io::Read::read_exact(&mut file, &mut enc).is_err() {
                 return Resp::empty(500);
             }
-            crate::decrypt_file_data(info.encryption_key.as_ref().unwrap(), info.encryption_salt.as_ref().unwrap(), &info.file_id, &enc, total)
+            crate::decrypt_file_data(info.encryption_key.as_ref().unwrap(), info.encryption_salt.as_ref().unwrap(), &info.file_id, &enc, total, info.aead_bound)
         } else {
             let mut buf = vec![0u8; total as usize];
             file.seek(SeekFrom::Start(info.offset_in_bundle))
@@ -751,8 +774,13 @@ async function login(){
     const cr = await fetch('/challenge');
     if (!cr.ok) { err.textContent = 'Connection error.'; return; }
     const { nonce } = await cr.json();
-    const proof = sha256hex(nonce + ':' + pw);
+    err.textContent = 'Unlocking…';
+    // Must match PROOF_ITERATIONS on the server: hash once, then re-hash the
+    // hex string that many times so a captured proof is costly to brute-force.
+    let proof = sha256hex(nonce + ':' + pw);
+    for (let i = 0; i < 100000; i++) proof = sha256hex(proof);
     const r = await fetch('/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({nonce, proof})});
+    err.textContent = '';
     if (r.ok) { document.getElementById('login').classList.add('hidden'); document.getElementById('app').classList.remove('hidden'); load(); }
     else if (r.status === 429) { const j = await r.json(); err.textContent = 'Too many attempts. Wait ' + (j.retry||30) + 's.'; }
     else { err.textContent = 'Wrong password.'; }

@@ -938,6 +938,7 @@ fn get_stream_response(
                 stream_info.total_size,
                 start,
                 bytes_to_read,
+                stream_info.aead_bound,
             ).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
         } else {
             let mut buf = Vec::with_capacity(bytes_to_read as usize);
@@ -961,7 +962,7 @@ fn get_stream_response(
             file.read_exact(&mut enc_buf)?;
             let key = stream_info.encryption_key.as_ref().unwrap();
             let salt = stream_info.encryption_salt.as_ref().unwrap();
-            decrypt_file_data(key, salt, &stream_info.file_id, &enc_buf, len)
+            decrypt_file_data(key, salt, &stream_info.file_id, &enc_buf, len, stream_info.aead_bound)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
         } else {
             let mut buf = vec![0u8; len as usize];
@@ -989,7 +990,7 @@ pub(crate) fn generate_thumbnail(
         let mut enc_buf = vec![0u8; enc_size as usize];
         file.seek(SeekFrom::Start(stream_info.offset_in_bundle))?;
         file.read_exact(&mut enc_buf)?;
-        decrypt_file_data(key, salt, &stream_info.file_id, &enc_buf, stream_info.total_size)
+        decrypt_file_data(key, salt, &stream_info.file_id, &enc_buf, stream_info.total_size, stream_info.aead_bound)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
     } else {
         file.seek(SeekFrom::Start(stream_info.offset_in_bundle))?;
