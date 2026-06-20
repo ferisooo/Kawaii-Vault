@@ -2098,6 +2098,8 @@ export default function App() {
             themeMode={themeMode}
             getCachedFile={sessionCache.getCachedFile}
             setCachedFile={sessionCache.setCachedFile}
+            thumbnail={thumbs.thumbnails[store.fullscreenFile.id] || null}
+            thumbResolution={thumbResolution}
           />
         </Suspense>
       )}

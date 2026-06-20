@@ -4,6 +4,7 @@ import { X, Play, Pause, Volume2, VolumeX, Image, Film, Music, FileText, File, L
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { VaultFile } from "../stores/useStore";
 import type { ThemeMode } from "../hooks/useThemeMode";
+import { getCachedThumbnail } from "../utils/thumbnailDB";
 
 const MIME_MAP: Record<string, string> = {
   mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
@@ -24,6 +25,8 @@ interface Props {
   themeMode?: ThemeMode;
   getCachedFile?: (fileId: string) => ArrayBuffer | null;
   setCachedFile?: (fileId: string, data: ArrayBuffer) => void;
+  thumbnail?: string | null;
+  thumbResolution?: number;
 }
 
 const categoryIcons: Record<string, typeof File> = {
@@ -36,7 +39,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function FullscreenViewer({ file, files = [], onClose, onNavigate, onDelete, themeMode = "cyberpunk", getCachedFile, setCachedFile }: Props) {
+export default function FullscreenViewer({ file, files = [], onClose, onNavigate, onDelete, themeMode = "cyberpunk", getCachedFile, setCachedFile, thumbnail, thumbResolution = 256 }: Props) {
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -50,6 +53,36 @@ export default function FullscreenViewer({ file, files = [], onClose, onNavigate
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState(false);
   const retryCountRef = useRef(0);
+
+  // Pre-cached thumbnail shown instantly while the full-res image decrypts, so
+  // a pre-cached image never sits behind a bare "Decrypting…" spinner.
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+
+  // Resolve a placeholder thumbnail for images: prefer the in-memory thumbnail
+  // (already an object URL), otherwise read the persistent pre-cache from
+  // IndexedDB. Cleared as soon as the full image is ready.
+  useEffect(() => {
+    if (!file || file.category !== "Images") {
+      setThumbUrl(null);
+      return;
+    }
+    if (thumbnail) {
+      setThumbUrl(thumbnail);
+      return;
+    }
+    let cancelled = false;
+    let objUrl: string | null = null;
+    setThumbUrl(null);
+    getCachedThumbnail(file.id + "@" + thumbResolution).then((blob) => {
+      if (cancelled || !blob) return;
+      objUrl = URL.createObjectURL(blob);
+      setThumbUrl(objUrl);
+    });
+    return () => {
+      cancelled = true;
+      if (objUrl) URL.revokeObjectURL(objUrl);
+    };
+  }, [file?.id, thumbnail, thumbResolution]);
 
   // Fetch decrypted content when file changes
   useEffect(() => {
@@ -316,9 +349,7 @@ export default function FullscreenViewer({ file, files = [], onClose, onNavigate
                 transition={{ type: "spring", stiffness: 300, damping: 25 }}
                 className="relative max-w-full max-h-full"
               >
-                {contentLoading ? (
-                  <LoadingOverlay />
-                ) : contentUrl && !contentError ? (
+                {contentUrl && !contentError ? (
                   <img
                     src={contentUrl}
                     alt={file.name}
@@ -330,6 +361,25 @@ export default function FullscreenViewer({ file, files = [], onClose, onNavigate
                       setContentError(true);
                     }}
                   />
+                ) : contentLoading && thumbUrl ? (
+                  // Pre-cached thumbnail stands in for the full image while it
+                  // decrypts — instant for pre-cached images, no spinner.
+                  <div className="relative">
+                    <img
+                      src={thumbUrl}
+                      alt={file.name}
+                      className="max-w-full max-h-[calc(100vh-120px)] object-contain rounded-sm border border-[var(--color-neon-dark)]/30"
+                    />
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                      className="absolute bottom-3 right-3"
+                    >
+                      <Loader2 size={20} className="text-[var(--color-neon-primary)] drop-shadow-[0_0_4px_var(--color-neon-glow)]" />
+                    </motion.div>
+                  </div>
+                ) : contentLoading ? (
+                  <LoadingOverlay />
                 ) : (
                   <PlaceholderFallback icon={Image} label="Encrypted preview · Actual content secured in vault" />
                 )}

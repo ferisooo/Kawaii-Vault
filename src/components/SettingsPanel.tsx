@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Palette, Shield, Info, Clock, Trash2, Lock, Image, HardDrive, Download, Upload, Cpu, HelpCircle, FolderOpen, AlertTriangle, ChevronDown, Crown, ExternalLink } from "lucide-react";
+import { X, Palette, Shield, Info, Clock, Trash2, Lock, Image, HardDrive, Download, Upload, Cpu, HelpCircle, FolderOpen, AlertTriangle, ChevronDown, Crown, RotateCcw } from "lucide-react";
 import CyberButton from "./CyberButton";
 import PhoneAccessCard from "./PhoneAccessCard";
 import type { Theme } from "../stores/useStore";
@@ -740,23 +740,6 @@ function HelpInfoTab({ vaultSizeInfo, isPro, licenseKey, licenseEmail, licenseLo
         </div>
       )}
 
-      {/* Feedback Form */}
-      <div className="px-4 py-3">
-        <button
-          onClick={async () => {
-            try {
-              await invoke("open_url_in_browser", { url: "https://docs.google.com/forms/d/e/1FAIpQLScRpKg7tSZTKWwrqekMOzk8CiQfGWtXeL6_8YqItHdr-B-Vqg/viewform?usp=header" });
-            } catch {
-              window.open("https://docs.google.com/forms/d/e/1FAIpQLScRpKg7tSZTKWwrqekMOzk8CiQfGWtXeL6_8YqItHdr-B-Vqg/viewform?usp=header", "_blank");
-            }
-          }}
-          className="flex items-center gap-2 font-mono text-[17px] text-[var(--color-neon-primary)] hover:text-[var(--color-neon-secondary)] transition-colors cursor-pointer bg-transparent border-none p-0"
-        >
-          <ExternalLink size={14} />
-          Bugs/Feedback
-        </button>
-      </div>
-
       {/* Version */}
       <div className="text-center font-mono text-[17px] text-[var(--color-cyber-muted)]/50 pt-2">
         CyberVault v1.0.0 · AES-256-GCM · Argon2id KDF
@@ -1281,7 +1264,29 @@ function ToolsSections({ isPro, themeMode, autoLockTimeout, onAutoLockChange, du
       <ProLockOverlay locked={!isPro} label="Pro — Advanced Settings">
       <CollapsibleSection id="advanced" icon={<AlertTriangle size={13} className="text-amber-400" />} label="Advanced" labelClass="text-amber-400/80" borderClass="border-amber-500/40" open={openSections.has("advanced")} onToggle={toggle}>
         <div className="p-3 rounded-sm bg-amber-500/5 border border-amber-500/20 space-y-4">
-          <p className="font-mono text-[17px] text-amber-400/60 uppercase tracking-wider">Fine-tune how thumbnails and imports behave</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-mono text-[17px] text-amber-400/60 uppercase tracking-wider">Fine-tune how thumbnails and imports behave</p>
+            <button
+              onClick={() => {
+                onThumbResolutionChange?.(256);
+                setBypassChunkLimits(false);
+                onBypassChunkLimitsChange?.(false);
+                setBypassThumbnailCache(false);
+                onBypassThumbnailCacheChange?.(false);
+                onCacheAllThumbnailsChange?.(false);
+                onMaxThumbnailsChange?.(200);
+                onCooldownMsChange?.(5000);
+                onFullscreenUnloadChange?.(true);
+                onClearVideoCacheOnLockChange?.(false);
+                onMemoryAmberPercentChange?.(1.5);
+                onDisableFileEvictionChange?.(false);
+              }}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 hover:border-amber-400/60 transition-all font-mono text-[15px] text-amber-400 hover:text-amber-300 cursor-pointer"
+            >
+              <RotateCcw size={13} />
+              Reset to recommended
+            </button>
+          </div>
 
           {/* Thumbnail resolution slider */}
           <div className="space-y-2">
