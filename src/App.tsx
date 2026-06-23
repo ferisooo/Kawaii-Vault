@@ -229,25 +229,25 @@ export default function App() {
     const allMedia = files.filter(f => f.category === "Images" || f.category === "Videos");
     const pg = store.vaultPages.find(p => p.id === store.currentPage);
     if (pg?.categories?.[0]?.type !== "media") return allMedia;
-    // Media page visibility is self-healing: show files associated with THIS
-    // page PLUS any media not owned by ANY OTHER page. That way files stranded
-    // by an interrupted import (no page association) are always visible here
-    // instead of being invisible-but-counted-in-size. The adoption effect
-    // below then persists the association in the background.
-    const ownedElsewhere = new Set(
-      store.vaultPages.filter(p => p.id !== pg.id).flatMap(p => p.fileIds)
-    );
+    // A media page shows ONLY the files that belong to it. Media stranded by an
+    // interrupted/page-less import (watch folder, browser download, etc.) is
+    // recovered by the orphan-rescue effect below, which adopts it into the
+    // FIRST media page — so strays are never leaked onto, or absorbed by, every
+    // other (or newly-created) media page.
     const mine = new Set(pg.fileIds);
-    return allMedia.filter(f => mine.has(f.id) || !ownedElsewhere.has(f.id));
+    return allMedia.filter(f => mine.has(f.id));
   }, [files, store.vaultPages, store.currentPage]);
   // Fixed filter set on media pages so the Images/Videos chips are always
   // offered, even before any file of that kind exists in the vault.
   const mediaCategories = useMemo(() => ["All", "Images", "Videos"], []);
 
   // Rescue orphaned media files: an import interrupted mid-way (auto-lock,
-  // crash, cancel) could leave files in the vault that no page references —
-  // they count toward the vault size but are invisible and unmanageable on
-  // every media page. When a media page is open, adopt any such files into it.
+  // crash, cancel) or a page-less import (watch folder, browser download) could
+  // leave files in the vault that no page references — they count toward the
+  // vault size but are invisible and unmanageable. When a media page is open,
+  // adopt any such files into the FIRST media page so they have a single stable
+  // home, instead of dumping them into whichever page happens to be open (which
+  // made strays surface on every media page, including freshly-created ones).
   const orphanRescueNotifiedRef = useRef(false);
   useEffect(() => {
     if (!isMediaPage || !store.currentPage || files.length === 0) return;
@@ -256,7 +256,11 @@ export default function App() {
       .filter((f) => (f.category === "Images" || f.category === "Videos") && !referenced.has(f.id))
       .map((f) => f.id);
     if (orphans.length === 0) return;
-    store.addFilesToPage(orphans, store.currentPage);
+    const firstMediaPageId = store.vaultPages.find(
+      (p) => p.categories?.[0]?.type === "media"
+    )?.id;
+    if (!firstMediaPageId) return;
+    store.addFilesToPage(orphans, firstMediaPageId);
     if (!orphanRescueNotifiedRef.current) {
       orphanRescueNotifiedRef.current = true;
       store.notify(`Recovered ${orphans.length} file${orphans.length > 1 ? "s" : ""} from an interrupted import`, "success");
