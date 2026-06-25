@@ -1763,7 +1763,8 @@ impl VaultManager {
         self.is_pro = true;
     }
 
-    /// Called from lib.rs after successful Gumroad API validation
+    /// Records an entered license key locally for display. The app is fully
+    /// free, so no server validation is performed (kept for UI compatibility).
     pub fn set_license_validated(&mut self, key: String, email: Option<String>) {
         self.license_info = Some(LicenseInfo {
             key: Some(key),

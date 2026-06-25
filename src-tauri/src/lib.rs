@@ -8,7 +8,6 @@ use std::io::{Read, Seek, SeekFrom};
 use tauri::{State, Manager, Emitter};
 use tauri::http::{header::*, response::Builder as ResponseBuilder, StatusCode};
 use http_range::HttpRange;
-use obfstr::obfstr;
 
 struct AppState {
     vault_manager: Mutex<VaultManager>,
@@ -651,125 +650,30 @@ async fn get_license_status(app: tauri::AppHandle) -> Result<LicenseStatus, Stri
     with_vm(app, |vm| Ok(vm.get_license_status())).await
 }
 
+// NOTE: CyberVault is fully free — every feature is unlocked for everyone and
+// there is no paid tier. The license commands below are kept only so the
+// existing frontend keeps compiling, but they deliberately make NO network
+// call. The previous implementation contacted api.gumroad.com on activation
+// and on a 24h timer; that was dead weight that still produced surprising
+// outbound requests (a privacy/network surface) for a product with nothing to
+// verify. They now resolve locally and always report the free "pro" status.
 #[tauri::command]
 async fn validate_license(state: State<'_, AppState>, key: String) -> Result<LicenseStatus, String> {
     let trimmed = key.trim().to_string();
-
-    // Gumroad product ID is supplied at build time, never committed.
-    let product_id = option_env!("GUMROAD_PRODUCT_ID").unwrap_or("").to_string();
-    let verify_url = obfstr!("https://api.gumroad.com/v2/licenses/verify").to_string();
-
-    let client = reqwest::Client::new();
-    let params = [
-        ("product_id", product_id.as_str()),
-        ("license_key", trimmed.as_str()),
-        ("increment_uses_count", "true"),
-    ];
-
-    let res = client.post(&verify_url)
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| format!("Network error: {}", e))?;
-
-    if res.status().as_u16() == 404 {
-        return Err("Invalid license key".into());
+    if trimmed.is_empty() {
+        return Err("Enter a license key".into());
     }
-
-    let data: serde_json::Value = res.json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
-
-    if data.get("success").and_then(|v| v.as_bool()) != Some(true) {
-        let msg = data.get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("License verification failed");
-        return Err(msg.to_string());
-    }
-
-    // Check refunded
-    if data.pointer("/purchase/refunded").and_then(|v| v.as_bool()) == Some(true) {
-        return Err("This license has been refunded".into());
-    }
-
-    // Check subscription cancelled
-    if data.pointer("/purchase/subscription_cancelled_at").is_some()
-        && !data.pointer("/purchase/subscription_cancelled_at").unwrap().is_null()
-    {
-        return Err("Subscription has been cancelled".into());
-    }
-
-    // Check subscription failed (card error, etc.)
-    if data.pointer("/purchase/subscription_failed_at").is_some()
-        && !data.pointer("/purchase/subscription_failed_at").unwrap().is_null()
-    {
-        return Err("Subscription payment failed".into());
-    }
-
-    let email = data.pointer("/purchase/email")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
-    // Store validated license in Rust state
+    // Record the entered key locally for display only; no server is contacted.
     let mut vm = state.vault_manager.lock().map_err(|e| e.to_string())?;
-    vm.set_license_validated(trimmed, email);
+    vm.set_license_validated(trimmed, None);
     Ok(vm.get_license_status())
 }
 
 #[tauri::command]
 async fn revalidate_license(state: State<'_, AppState>) -> Result<LicenseStatus, String> {
-    let key = {
-        let vm = state.vault_manager.lock().map_err(|e| e.to_string())?;
-        vm.get_stored_license_key()
-    };
-
-    let key = key.ok_or("No license key stored")?;
-
-    let product_id = option_env!("GUMROAD_PRODUCT_ID").unwrap_or("").to_string();
-    let verify_url = obfstr!("https://api.gumroad.com/v2/licenses/verify").to_string();
-
-    let client = reqwest::Client::new();
-    let params = [
-        ("product_id", product_id.as_str()),
-        ("license_key", key.as_str()),
-        ("increment_uses_count", "false"),
-    ];
-
-    let res = client.post(&verify_url)
-        .form(&params)
-        .send()
-        .await;
-
-    match res {
-        Ok(response) => {
-            let data: serde_json::Value = response.json()
-                .await
-                .map_err(|e| format!("Parse error: {}", e))?;
-
-            if data.get("success").and_then(|v| v.as_bool()) != Some(true)
-                || data.pointer("/purchase/refunded").and_then(|v| v.as_bool()) == Some(true)
-                || (data.pointer("/purchase/subscription_cancelled_at").is_some()
-                    && !data.pointer("/purchase/subscription_cancelled_at").unwrap().is_null())
-                || (data.pointer("/purchase/subscription_failed_at").is_some()
-                    && !data.pointer("/purchase/subscription_failed_at").unwrap().is_null())
-            {
-                // License revoked — deactivate
-                let mut vm = state.vault_manager.lock().map_err(|e| e.to_string())?;
-                vm.deactivate_license();
-                return Ok(vm.get_license_status());
-            }
-
-            // Still valid — mark revalidated
-            let mut vm = state.vault_manager.lock().map_err(|e| e.to_string())?;
-            vm.mark_revalidated();
-            Ok(vm.get_license_status())
-        }
-        Err(_) => {
-            // Network error — keep current status (offline grace)
-            let vm = state.vault_manager.lock().map_err(|e| e.to_string())?;
-            Ok(vm.get_license_status())
-        }
-    }
+    // Nothing to revalidate and no network call — just report current status.
+    let vm = state.vault_manager.lock().map_err(|e| e.to_string())?;
+    Ok(vm.get_license_status())
 }
 
 #[tauri::command]
