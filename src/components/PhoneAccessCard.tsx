@@ -34,7 +34,7 @@ export default function PhoneAccessCard({ tauri }: Props) {
 
   const start = async () => {
     setError(null);
-    if (password.length < 8) { setError("Access password must be at least 8 characters."); return; }
+    if (password.length < 12) { setError("Access password must be at least 12 characters."); return; }
     if (password !== confirm) { setError("Passwords don't match."); return; }
     setBusy(true);
     try {
@@ -88,7 +88,7 @@ export default function PhoneAccessCard({ tauri }: Props) {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Access password (min 8 chars)"
+            placeholder="Access password (min 12 chars)"
             className="w-full mb-2 bg-[var(--color-cyber-black)] border border-[var(--color-cyber-border)] rounded-sm px-3 py-2 text-[16px] text-[var(--color-cyber-text)] font-mono focus:border-[var(--color-neon-primary)] outline-none"
           />
           <input

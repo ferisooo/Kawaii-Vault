@@ -700,10 +700,19 @@ const MOBILE_HTML: &str = r#"<!doctype html>
   #vbar { display:flex; align-items:center; gap:10px; padding:calc(8px + var(--safe-t)) 14px 8px; background:rgba(0,0,0,.85); }
   #vbar .name { flex:1; color:#ddd; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #vbar button { background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.3); color:#fff; border-radius:9px; padding:9px 16px; font-size:16px; font-weight:600; }
-  #vbody { flex:1; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:6px; }
+  #vbody { flex:1; overflow:hidden; padding:6px; position:relative; touch-action:pan-x pan-y; }
+  #vmedia { width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
   #vbody img, #vbody video { max-width:100%; max-height:100%; object-fit:contain; }
+  #vbody img { transition:transform .15s ease; transform-origin:center center; will-change:transform; }
+  #vbody img.zoomed { object-fit:contain; max-width:none; max-height:none; transition:none; }
   #vmsg { color:var(--muted); font-size:15px; }
   #count { color:var(--muted); font-size:12px; padding:8px 14px 10px; }
+  .nav { position:absolute; top:50%; transform:translateY(-50%); width:44px; height:64px; display:flex; align-items:center; justify-content:center;
+         background:rgba(0,0,0,.4); border:1px solid rgba(255,255,255,.18); color:#fff; font-size:24px; border-radius:10px; z-index:2; user-select:none; }
+  .nav.prev { left:8px; } .nav.next { right:8px; }
+  #vpos { position:absolute; bottom:calc(10px + var(--safe-b)); left:50%; transform:translateX(-50%); background:rgba(0,0,0,.55); color:#cfcfe0;
+          font-size:12px; padding:3px 10px; border-radius:12px; z-index:2; }
+  header button.icon { padding:9px 11px; font-size:16px; line-height:1; }
 </style></head>
 <body>
 <div id="login">
@@ -719,6 +728,7 @@ const MOBILE_HTML: &str = r#"<!doctype html>
     <div class="hrow">
       <b>VAULT</b>
       <input id="q" placeholder="Search…" oninput="render()"/>
+      <button class="icon" onclick="load()" title="Refresh" aria-label="Refresh">↻</button>
       <button onclick="logout()">Lock</button>
     </div>
     <div class="chips">
@@ -736,7 +746,12 @@ const MOBILE_HTML: &str = r#"<!doctype html>
     <span class="name" id="vname"></span>
     <button onclick="closeViewer()">✕ Close</button>
   </div>
-  <div id="vbody"></div>
+  <div id="vbody">
+    <div id="vmedia"></div>
+    <div class="nav prev" onclick="step(-1)">‹</div>
+    <div class="nav next" onclick="step(1)">›</div>
+    <div id="vpos"></div>
+  </div>
 </div>
 
 <script>
@@ -763,8 +778,11 @@ function sha256hex(ascii){
 let FILES = [];
 let FILTER = 'all';
 let curBlob = null;
+let VIEW_LIST = [];   // current filtered/sorted list shown in the grid
+let curIndex = -1;    // index into VIEW_LIST currently open in the viewer
 const isImg = f => f.category === 'Images';
 const isVid = f => f.category === 'Videos';
+const isViewable = f => isImg(f) || isVid(f);
 
 async function login(){
   const pw = document.getElementById('pw').value;
@@ -812,9 +830,10 @@ function render(){
     return !q || (f.name||'').toLowerCase().includes(q);
   });
   document.getElementById('count').textContent = list.length + ' file' + (list.length===1?'':'s');
+  VIEW_LIST = list;
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
-  for (const f of list){
+  list.forEach((f, i) => {
     const cell = document.createElement('div');
     cell.className = 'cell';
     if (isImg(f) || isVid(f)){
@@ -833,25 +852,48 @@ function render(){
     tag.className = 'tag';
     tag.textContent = f.name;
     cell.appendChild(tag);
-    cell.onclick = () => openItem(f);
+    cell.onclick = () => openItem(i);
     grid.appendChild(cell);
-  }
+  });
 }
 
-async function openItem(f){
-  const v = document.getElementById('viewer');
-  const body = document.getElementById('vbody');
+let loadSeq = 0;          // guards against out-of-order async image loads while swiping fast
+let zoomed = false;
+
+function viewerOpen(){ return !document.getElementById('viewer').classList.contains('hidden'); }
+
+// Update the prev/next arrow visibility + the "3 / 12" position pill.
+function updateNav(){
+  const prev = document.querySelector('.nav.prev'), next = document.querySelector('.nav.next');
+  prev.style.display = curIndex > 0 ? 'flex' : 'none';
+  next.style.display = curIndex < VIEW_LIST.length - 1 ? 'flex' : 'none';
+  document.getElementById('vpos').textContent = VIEW_LIST.length ? (curIndex + 1) + ' / ' + VIEW_LIST.length : '';
+}
+
+async function openItem(index){
+  if (index < 0 || index >= VIEW_LIST.length) return;
+  curIndex = index;
+  zoomed = false;
+  const f = VIEW_LIST[index];
+  const media = document.getElementById('vmedia');
   document.getElementById('vname').textContent = f.name;
-  body.innerHTML = '<div id="vmsg">Loading…</div>';
-  v.classList.remove('hidden');
+  media.innerHTML = '<div id="vmsg">Loading…</div>';
+  if (!viewerOpen()){
+    document.getElementById('viewer').classList.remove('hidden');
+    // Push a history entry so the phone's back gesture closes the viewer
+    // instead of leaving the page.
+    history.pushState({ viewer: true }, '');
+  }
+  updateNav();
+  const seq = ++loadSeq;
   const url = '/file/' + f.id;
   if (isVid(f)){
     // Video streams via Range; the element handles partial responses.
-    body.innerHTML = '';
+    media.innerHTML = '';
     const el = document.createElement('video');
     el.src = url; el.controls = true; el.autoplay = true; el.playsInline = true;
-    el.onerror = () => { body.innerHTML = '<div id="vmsg">Could not play this video.</div>'; };
-    body.appendChild(el);
+    el.onerror = () => { if (seq===loadSeq) media.innerHTML = '<div id="vmsg">Could not play this video.</div>'; };
+    media.appendChild(el);
   } else if (isImg(f)){
     // Fetch the FULL image as a blob (a plain <img> can receive a truncated
     // ranged response for large files, which renders as a black screen).
@@ -859,27 +901,84 @@ async function openItem(f){
       const r = await fetch(url);
       if (!r.ok) throw new Error('http ' + r.status);
       const blob = await r.blob();
+      if (seq !== loadSeq) return; // a newer navigation superseded this load
       if (curBlob) URL.revokeObjectURL(curBlob);
       curBlob = URL.createObjectURL(blob);
-      body.innerHTML = '';
+      media.innerHTML = '';
       const el = document.createElement('img');
       el.src = curBlob;
-      body.appendChild(el);
+      el.ondblclick = toggleZoom;
+      media.appendChild(el);
     } catch(e){
-      body.innerHTML = '<div id="vmsg">Could not load this image.</div>';
+      if (seq===loadSeq) media.innerHTML = '<div id="vmsg">Could not load this image.</div>';
     }
   } else {
-    body.innerHTML = '';
-    const a = document.createElement('a'); a.href = url; a.textContent = 'Open ' + f.name; a.style.color = '#fff'; body.appendChild(a);
+    media.innerHTML = '';
+    const a = document.createElement('a'); a.href = url; a.textContent = 'Open ' + f.name; a.style.color = '#fff'; media.appendChild(a);
   }
 }
+
+// Move to the previous/next VIEWABLE item (skips non-media so swiping stays useful).
+function step(dir){
+  let i = curIndex + dir;
+  while (i >= 0 && i < VIEW_LIST.length && !isViewable(VIEW_LIST[i])) i += dir;
+  if (i >= 0 && i < VIEW_LIST.length) openItem(i);
+}
+
+function toggleZoom(e){
+  const img = document.querySelector('#vmedia img');
+  if (!img) return;
+  zoomed = !zoomed;
+  img.classList.toggle('zoomed', zoomed);
+  img.style.transform = zoomed ? 'scale(2.2)' : '';
+}
+
 function closeViewer(){
-  document.getElementById('vbody').innerHTML = '';
+  // If our history entry is still on the stack, pop it (this re-fires popstate
+  // with no state, landing in the else-branch below as a no-op).
+  if (history.state && history.state.viewer) { history.back(); return; }
+  document.getElementById('vmedia').innerHTML = '';
   document.getElementById('viewer').classList.add('hidden');
+  curIndex = -1; zoomed = false;
   if (curBlob) { URL.revokeObjectURL(curBlob); curBlob = null; }
 }
+
 // Android hardware back / browser back closes the viewer instead of leaving.
-window.addEventListener('popstate', () => { if (!document.getElementById('viewer').classList.contains('hidden')) closeViewer(); });
+window.addEventListener('popstate', () => {
+  if (viewerOpen()){
+    document.getElementById('vmedia').innerHTML = '';
+    document.getElementById('viewer').classList.add('hidden');
+    curIndex = -1; zoomed = false;
+    if (curBlob) { URL.revokeObjectURL(curBlob); curBlob = null; }
+  }
+});
+
+// Horizontal swipe in the viewer navigates between items (ignored while zoomed
+// or when starting on a video, so its own controls keep working).
+(function(){
+  const body = document.getElementById('vbody');
+  let x0 = null, y0 = null, onVideo = false;
+  body.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) { x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+    onVideo = !!(e.target && e.target.tagName === 'VIDEO');
+  }, { passive:true });
+  body.addEventListener('touchend', e => {
+    if (x0 === null || zoomed || onVideo) { x0 = null; return; }
+    const t = e.changedTouches[0];
+    const dx = t.clientX - x0, dy = t.clientY - y0;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
+    x0 = null;
+  }, { passive:true });
+})();
+
+// Desktop/keyboard niceties (also helps when testing in a browser).
+window.addEventListener('keydown', e => {
+  if (!viewerOpen()) return;
+  if (e.key === 'ArrowRight') step(1);
+  else if (e.key === 'ArrowLeft') step(-1);
+  else if (e.key === 'Escape') closeViewer();
+});
 document.getElementById('pw').addEventListener('keydown', e => { if(e.key==='Enter') login(); });
 </script>
 </body></html>"#;
