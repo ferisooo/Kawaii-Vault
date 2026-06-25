@@ -1197,6 +1197,44 @@ const NAV_OVERLAY_JS: &str = r#"
 })();
 "#;
 
+/// Injected into the private browser: the vault's auto-lock idle timer lives in
+/// the MAIN window and never sees input that happens in this separate browser
+/// window, so a long browsing/watching session would auto-lock (and close this
+/// window) mid-use. This emits a throttled one-way "browser-activity" event on
+/// real user input OR while a video/audio is actually playing, which the app
+/// turns into an activity touch. If the user genuinely walks away (no input,
+/// nothing playing) the pings stop and auto-lock proceeds as normal.
+const ACTIVITY_PING_JS: &str = r#"
+(function () {
+  if (window.__cvActivity) return;
+  window.__cvActivity = true;
+  var last = 0;
+  function ping() {
+    var now = Date.now();
+    if (now - last < 8000) return; // throttle: at most once per 8s
+    last = now;
+    try {
+      var inv = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+      if (inv) inv("plugin:event|emit", { event: "browser-activity", payload: {} });
+    } catch (e) {}
+  }
+  ["mousemove", "mousedown", "keydown", "wheel", "scroll", "touchstart", "touchmove"].forEach(function (ev) {
+    try { window.addEventListener(ev, ping, { passive: true, capture: true }); } catch (e) {}
+  });
+  // Active media playback counts as activity, so watching a video without
+  // touching anything still keeps the vault unlocked. Stops when paused/ended.
+  setInterval(function () {
+    try {
+      var m = document.querySelectorAll("video, audio");
+      for (var i = 0; i < m.length; i++) {
+        var el = m[i];
+        if (!el.paused && !el.ended && el.readyState > 2 && el.currentTime > 0) { ping(); break; }
+      }
+    } catch (e) {}
+  }, 5000);
+})();
+"#;
+
 fn close_browser_window(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window(BROWSER_WINDOW_LABEL) {
         let _ = win.close();
@@ -1295,6 +1333,7 @@ async fn browser_open(app: tauri::AppHandle, url: String) -> Result<(), String> 
     .incognito(true)
     .initialization_script(MEDIA_SCANNER_JS)
     .initialization_script(NAV_OVERLAY_JS)
+    .initialization_script(ACTIVITY_PING_JS)
     .on_navigation(move |u| {
         let _ = nav_handle.emit("browser-nav", u.to_string());
         // External pages must never navigate to app-internal schemes.

@@ -774,9 +774,15 @@ export default function App() {
     if (store.screen !== "vault") return;
     let unlistenOk: (() => void) | undefined;
     let unlistenFail: (() => void) | undefined;
+    let unlistenAct: (() => void) | undefined;
     (async () => {
       try {
         const { listen } = await import("@tauri-apps/api/event");
+        // Browsing/watching in the separate browser window counts as activity,
+        // so the vault's idle timer doesn't lock (and close the browser) mid-use.
+        unlistenAct = await listen("browser-activity", () => {
+          tauri.touchActivity().catch(() => {});
+        });
         unlistenOk = await listen<{ name: string; ids: string[] } | string>("browser-download-imported", (e) => {
           // Payload is { name, ids } from the backend; tolerate a bare string too.
           const payload = e.payload as { name?: string; ids?: string[] } | string;
@@ -800,7 +806,7 @@ export default function App() {
         });
       } catch { /* events unavailable (demo) */ }
     })();
-    return () => { unlistenOk?.(); unlistenFail?.(); };
+    return () => { unlistenOk?.(); unlistenFail?.(); unlistenAct?.(); };
   }, [store.screen, loadFiles]);
 
   const [lockFlash, setLockFlash] = useState(false);
